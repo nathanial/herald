@@ -344,6 +344,190 @@ test "308 Permanent Redirect" := do
     result.response.status.code ≡ 308
   | .error e => throw (IO.userError s!"Parse failed: {e}")
 
+-- ============================================================================
+-- Additional Edge Cases (from http-parser test suite)
+-- ============================================================================
+
+test "line folding in response header" := do
+  let input := httpMsg [
+    "HTTP/1.1 200 OK",
+    "X-Folded: first",
+    "\tsecond line",
+    "Content-Length: 0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    (result.response.headers.get "X-Folded") ≡ some "first second line"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "chunked with hex size A-F" := do
+  let input := httpMsg [
+    "HTTP/1.1 200 OK",
+    "Transfer-Encoding: chunked",
+    "",
+    "F",
+    "0123456789abcde",
+    "0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    result.response.body.size ≡ 15
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "chunked with mixed case hex" := do
+  -- 0x1a = 26
+  let input := httpMsg [
+    "HTTP/1.1 200 OK",
+    "Transfer-Encoding: chunked",
+    "",
+    "1A",
+    "abcdefghijklmnopqrstuvwxyz",
+    "0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    -- 0x1A = 26
+    result.response.body.size ≡ 26
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "multiple informational responses" := do
+  -- 103 Early Hints followed by 200
+  let input := httpMsg [
+    "HTTP/1.1 103 Early Hints",
+    "Link: </style.css>; rel=preload; as=style",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    result.response.status.code ≡ 103
+    shouldSatisfy result.response.status.isInformational "should be informational"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "response with unusual reason phrase" := do
+  let input := httpMsg [
+    "HTTP/1.1 200 This is a very long and unusual reason phrase with special chars!",
+    "Content-Length: 0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    result.response.status.code ≡ 200
+    result.response.reason ≡ "This is a very long and unusual reason phrase with special chars!"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "451 Unavailable For Legal Reasons" := do
+  let input := httpMsg [
+    "HTTP/1.1 451 Unavailable For Legal Reasons",
+    "Content-Length: 0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    result.response.status.code ≡ 451
+    shouldSatisfy result.response.status.isClientError "451 should be client error"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "418 I'm a teapot" := do
+  let input := httpMsg [
+    "HTTP/1.1 418 I'm a teapot",
+    "Content-Length: 0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    result.response.status.code ≡ 418
+    shouldSatisfy result.response.status.isClientError "418 should be client error"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "chunked with chunk extension" := do
+  let input := httpMsg [
+    "HTTP/1.1 200 OK",
+    "Transfer-Encoding: chunked",
+    "",
+    "5;ext=value;another",
+    "hello",
+    "0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    let bodyStr := String.fromUTF8! result.response.body
+    bodyStr ≡ "hello"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "mixed CRLF and LF line endings" := do
+  -- Parser should tolerate LF-only in header continuation
+  let input := httpMsg [
+    "HTTP/1.1 200 OK",
+    "X-Header: value",
+    "Content-Length: 5",
+    "",
+    "Hello"
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    result.response.status.code ≡ 200
+    shouldSatisfy (result.response.body == "Hello".toUTF8) "body should be Hello"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "response header with leading OWS" := do
+  let input := httpMsg [
+    "HTTP/1.1 200 OK",
+    "X-Header:   value",
+    "Content-Length: 0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    (result.response.headers.get "X-Header") ≡ some "value"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "response header with trailing OWS" := do
+  let input := httpMsg [
+    "HTTP/1.1 200 OK",
+    "X-Header: value   ",
+    "Content-Length: 0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    (result.response.headers.get "X-Header") ≡ some "value"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "chunked with content length ignored" := do
+  -- Transfer-Encoding: chunked takes precedence over Content-Length
+  let input := httpMsg [
+    "HTTP/1.1 200 OK",
+    "Content-Length: 1000",
+    "Transfer-Encoding: chunked",
+    "",
+    "5",
+    "hello",
+    "0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    let bodyStr := String.fromUTF8! result.response.body
+    bodyStr ≡ "hello"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "proxy authentication required" := do
+  let input := httpMsg [
+    "HTTP/1.1 407 Proxy Authentication Required",
+    "Proxy-Authenticate: Basic realm=\"proxy\"",
+    "Content-Length: 0",
+    ""
+  ]
+  match Herald.parseResponse input with
+  | .ok result =>
+    result.response.status.code ≡ 407
+    (result.response.headers.get "Proxy-Authenticate") ≡ some "Basic realm=\"proxy\""
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
 #generate_tests
 
 end Tests.Parser.Responses

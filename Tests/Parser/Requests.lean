@@ -481,6 +481,182 @@ test "chunked lowercase hex" := do
     result.request.body.size ≡ 10
   | .error e => throw (IO.userError s!"Parse failed: {e}")
 
+-- ============================================================================
+-- Additional Edge Cases (from http-parser test suite)
+-- ============================================================================
+
+test "line folding in header value" := do
+  let input := http "GET /test HTTP/1.1\r\nX-Folded: first\r\n\tsecond\r\nHost: test.com\r\n\r\n"
+  match Herald.parseRequest input with
+  | .ok result =>
+    (result.request.headers.get "X-Folded") ≡ some "first second"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "line folding with multiple spaces" := do
+  let input := http "GET /test HTTP/1.1\r\nX-Folded: line1\r\n   line2\r\n\t line3\r\n\r\n"
+  match Herald.parseRequest input with
+  | .ok result =>
+    (result.request.headers.get "X-Folded") ≡ some "line1 line2 line3"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "hostname with underscore" := do
+  let input := httpMsg [
+    "GET /test HTTP/1.1",
+    "Host: under_score.example.org",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    (result.request.headers.get "Host") ≡ some "under_score.example.org"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "query url with question mark in value" := do
+  let input := httpMsg [
+    "GET /test?q=what?is+this HTTP/1.1",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    result.request.path ≡ "/test?q=what?is+this"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "CONNECT with body" := do
+  let input := httpMsg [
+    "CONNECT server.example.com:443 HTTP/1.1",
+    "Host: server.example.com:443",
+    "Content-Length: 10",
+    "",
+    "0123456789"
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    result.request.method ≡ Method.CONNECT
+    result.request.body.size ≡ 10
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "LINK request" := do
+  let input := httpMsg [
+    "LINK /resource HTTP/1.1",
+    "Host: example.com",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    match result.request.method with
+    | .other name => name ≡ "LINK"
+    | _ => throw (IO.userError "Expected 'other' method")
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "UNLINK request" := do
+  let input := httpMsg [
+    "UNLINK /resource HTTP/1.1",
+    "Host: example.com",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    match result.request.method with
+    | .other name => name ≡ "UNLINK"
+    | _ => throw (IO.userError "Expected 'other' method")
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "M-SEARCH SSDP discovery" := do
+  let input := httpMsg [
+    "M-SEARCH * HTTP/1.1",
+    "HOST: 239.255.255.250:1900",
+    "MAN: \"ssdp:discover\"",
+    "ST: ssdp:all",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    match result.request.method with
+    | .other name => name ≡ "M-SEARCH"
+    | _ => throw (IO.userError "Expected 'other' method")
+    result.request.path ≡ "*"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "SOURCE request ICE protocol" := do
+  let input := httpMsg [
+    "SOURCE /stream HTTP/1.0",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    match result.request.method with
+    | .other name => name ≡ "SOURCE"
+    | _ => throw (IO.userError "Expected 'other' method")
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "apachebench GET" := do
+  let input := httpMsg [
+    "GET /test HTTP/1.0",
+    "Host: test.com",
+    "User-Agent: ApacheBench/2.3",
+    "Accept: */*",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    result.request.method ≡ Method.GET
+    result.request.version.major ≡ 1
+    result.request.version.minor ≡ 0
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "proxy request absolute URI" := do
+  let input := httpMsg [
+    "GET http://proxy.example.com:8080/path?query HTTP/1.1",
+    "Host: proxy.example.com:8080",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    result.request.path ≡ "http://proxy.example.com:8080/path?query"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "chunked with content length ignored" := do
+  -- When both Content-Length and Transfer-Encoding: chunked are present,
+  -- chunked takes precedence per HTTP/1.1 spec
+  let input := httpMsg [
+    "POST /test HTTP/1.1",
+    "Content-Length: 100",
+    "Transfer-Encoding: chunked",
+    "",
+    "5",
+    "hello",
+    "0",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    let bodyStr := String.fromUTF8! result.request.body
+    bodyStr ≡ "hello"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "header value with leading whitespace" := do
+  let input := httpMsg [
+    "GET /test HTTP/1.1",
+    "X-Header:   value with leading spaces",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    -- Leading OWS should be trimmed
+    (result.request.headers.get "X-Header") ≡ some "value with leading spaces"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
+test "header value with trailing whitespace" := do
+  let input := httpMsg [
+    "GET /test HTTP/1.1",
+    "X-Header: value with trailing   ",
+    ""
+  ]
+  match Herald.parseRequest input with
+  | .ok result =>
+    -- Trailing OWS should be trimmed
+    (result.request.headers.get "X-Header") ≡ some "value with trailing"
+  | .error e => throw (IO.userError s!"Parse failed: {e}")
+
 #generate_tests
 
 end Tests.Parser.Requests
