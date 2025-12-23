@@ -4,3 +4,4 @@
 -/
 
 import Herald.Core
+import Herald.Parser
