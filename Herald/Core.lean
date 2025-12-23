@@ -100,6 +100,37 @@ def isClientError (s : StatusCode) : Bool := s.code >= 400 && s.code < 500
 def isServerError (s : StatusCode) : Bool := s.code >= 500 && s.code < 600
 def isError (s : StatusCode) : Bool := s.code >= 400
 
+/-- Get the default reason phrase for a status code -/
+def defaultReason (s : StatusCode) : String :=
+  match s.code with
+  | 100 => "Continue"
+  | 101 => "Switching Protocols"
+  | 200 => "OK"
+  | 201 => "Created"
+  | 202 => "Accepted"
+  | 204 => "No Content"
+  | 301 => "Moved Permanently"
+  | 302 => "Found"
+  | 303 => "See Other"
+  | 304 => "Not Modified"
+  | 307 => "Temporary Redirect"
+  | 308 => "Permanent Redirect"
+  | 400 => "Bad Request"
+  | 401 => "Unauthorized"
+  | 403 => "Forbidden"
+  | 404 => "Not Found"
+  | 405 => "Method Not Allowed"
+  | 409 => "Conflict"
+  | 410 => "Gone"
+  | 422 => "Unprocessable Entity"
+  | 429 => "Too Many Requests"
+  | 500 => "Internal Server Error"
+  | 501 => "Not Implemented"
+  | 502 => "Bad Gateway"
+  | 503 => "Service Unavailable"
+  | 504 => "Gateway Timeout"
+  | _ => ""
+
 instance : ToString StatusCode := ⟨fun s => toString s.code⟩
 
 end StatusCode
