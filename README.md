@@ -16,7 +16,7 @@ Herald parses HTTP/1.1 requests and responses into structured types, handling he
 Add to your `lakefile.lean`:
 
 ```lean
-require herald from ".." / "herald"
+require herald from git "https://github.com/nathanial/herald" @ "v0.0.1"
 ```
 
 ## Usage
