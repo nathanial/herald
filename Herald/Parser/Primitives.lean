@@ -60,6 +60,7 @@ namespace Ascii
   /-- Printable ASCII (SP through ~) -/
   def isPrint (b : UInt8) : Bool := b >= 0x20 && b <= 0x7E
 
+  -- TODO: Replace with Staple.Hex.hexByteToNat after staple release
   /-- Convert hex digit to value -/
   def hexValue (b : UInt8) : Nat :=
     if b >= 48 && b <= 57 then (b - 48).toNat  -- 0-9
