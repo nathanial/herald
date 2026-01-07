@@ -4,7 +4,7 @@ open Lake DSL
 package herald where
   version := v!"0.1.0"
 
-require crucible from git "https://github.com/nathanial/crucible" @ "v0.0.1"
+require crucible from git "https://github.com/nathanial/crucible" @ "v0.0.3"
 
 @[default_target]
 lean_lib Herald where
