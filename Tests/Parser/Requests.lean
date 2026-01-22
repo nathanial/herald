@@ -657,6 +657,6 @@ test "header value with trailing whitespace" := do
     (result.request.headers.get "X-Header") ≡ some "value with trailing"
   | .error e => throw (IO.userError s!"Parse failed: {e}")
 
-#generate_tests
+
 
 end Tests.Parser.Requests

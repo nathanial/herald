@@ -95,7 +95,7 @@ test "Headers getAll retrieves all values" := do
   let cookies := headers.getAll "Set-Cookie"
   cookies.size ≡ 2
 
-#generate_tests
+
 
 end Tests.Core
 

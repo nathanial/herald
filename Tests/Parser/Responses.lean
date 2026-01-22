@@ -528,6 +528,6 @@ test "proxy authentication required" := do
     (result.response.headers.get "Proxy-Authenticate") ≡ some "Basic realm=\"proxy\""
   | .error e => throw (IO.userError s!"Parse failed: {e}")
 
-#generate_tests
+
 
 end Tests.Parser.Responses
